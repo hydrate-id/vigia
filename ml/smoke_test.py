@@ -120,6 +120,8 @@ def main():
         ({"title": "澳门信息站", "meta": "", "text": "", "domain": "009951acclaim.sbs", "raw_markers": '<script src="js/sm4.js"></script>'}, 1, "gambling_shell"),
         ({"title": "搜狐", "meta": "", "text": "搜狐门户 新闻 体育 彩票 健康 财经 娱乐 科技 汽车 房产 教育 文化 时尚 视频 军事 旅游 母婴 星座 奥运 游戏 邮箱 博客 搜狐号 24小时直播 大视野 公益 畅游 17173 政务 网络监督专区 欢迎监督 如实举报 联系我们 法律声明 隐私权政策 网站地图 帮助中心", "domain": "sohu.com", "raw_markers": "..."}, 0, "normal"),
         ({"title": "Hashed", "meta": "", "text": "python sdk docs install guides", "domain": "example.com", "raw_markers": "mrktep6q3wyh7dti%252brmksm4nbivqwjr1"}, 0, "normal"),
+        ({"title": "K8凯发·天生赢家", "meta": "", "text": "亚洲顶级在线娱乐平台 官方实力直营 信誉保障 大额无忧", "domain": "008b.vip", "raw_markers": "<html lang=cn>"}, 1, "gambling"),
+        ({"title": "首页", "meta": "", "text": "欢迎访问本站 新闻资讯 产品中心 关于我们 联系我们 公司介绍 人才招聘 服务支持 常见问题 隐私政策", "domain": "example.cn", "raw_markers": "..."}, 0, "normal"),
     ]
     for page, elabel, estatus in cases:
         label, status = classify_page(page)

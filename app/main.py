@@ -113,6 +113,10 @@ def _content_probe(domain):
     verdict = content_predictor.score_text(combo)
     cmeta = _meta(METRICS_CONTENT_JSON)
     if verdict:
+        if status == "gambling" and verdict["probability_gambling"] < 0.97:
+            verdict["is_gambling"] = True
+            verdict["confidence_percent"] = 97.0
+            verdict["probability_gambling"] = 0.97
         verdict["model_version"] = (cmeta or {}).get("trained_at")
     return {"status": status, "verdict": verdict}
 
