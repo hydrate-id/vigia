@@ -1,6 +1,6 @@
 # Vigia
 
-Detect Indonesian online gambling (judol) domains. Two models, one API.
+Detect online gambling domains by name and page content. Two models, one API.
 
 ## What it does
 
