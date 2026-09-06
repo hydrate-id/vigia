@@ -4,7 +4,7 @@ import threading
 import numpy as np
 import onnxruntime as ort
 
-from ml.features import normalize_domain
+from ml.domain import normalize_domain
 
 
 class Predictor:

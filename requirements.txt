@@ -1,6 +1,5 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
-scikit-learn>=1.5
-skl2onnx>=1.17
 onnxruntime>=1.19
+numpy>=1.26
 apscheduler>=3.10

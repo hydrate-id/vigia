@@ -1,8 +1,9 @@
 import logging
+import os
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import (
@@ -18,15 +19,29 @@ from app.config import (
 )
 from app.dataset import append_domain, read_content_rows, read_rows
 from app.predictor import Predictor
-from app.scheduler import bootstrap, make_scheduler
-from ml.features import normalize_domain
+from ml.domain import normalize_domain
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("vigia")
 
 domain_predictor = Predictor(MODEL_ONNX, METRICS_JSON, threshold=PREDICT_THRESHOLD, normalizer=normalize_domain)
 content_predictor = Predictor(MODEL_CONTENT_ONNX, METRICS_CONTENT_JSON, threshold=PREDICT_THRESHOLD)
-scheduler = None
+
+# Worker mode (Docker): run APScheduler + train on boot.
+# Serverless (Vercel): predict-only, scheduling via GitHub Actions.
+_WORKER = os.environ.get("VIGIA_WORKER", "") == "1"
+_SERVERLESS = os.environ.get("VERCEL", "") == "1"
+
+
+def _check_rate(request):
+    from app.ratelimit import allow, client_ip, unlimited_token
+
+    token = request.query_params.get("token")
+    if unlimited_token(token):
+        return
+    ip = client_ip(request)
+    if not allow(ip):
+        raise HTTPException(status_code=429, detail="rate limit exceeded")
 
 
 def _meta(path):
@@ -39,22 +54,28 @@ def _meta(path):
 
 @asynccontextmanager
 async def lifespan(app):
-    global scheduler
     domain_predictor.load()
     content_predictor.load()
-    scheduler = make_scheduler(
-        domain_predictor, content_predictor, DATASET_CSV, CONTENT_CSV, MODELS_DIR
-    )
-    scheduler.start()
-    if not (domain_predictor.ready() and content_predictor.ready()):
-        t = threading.Thread(
-            target=bootstrap,
-            args=(domain_predictor, content_predictor, DATASET_CSV, CONTENT_CSV, MODELS_DIR),
-            daemon=True,
+    if _WORKER:
+        from app.scheduler import bootstrap, make_scheduler
+
+        scheduler = make_scheduler(
+            domain_predictor, content_predictor, DATASET_CSV, CONTENT_CSV, MODELS_DIR
         )
-        t.start()
-    yield
-    scheduler.shutdown(wait=False)
+        scheduler.start()
+        try:
+            if not (domain_predictor.ready() and content_predictor.ready()):
+                t = threading.Thread(
+                    target=bootstrap,
+                    args=(domain_predictor, content_predictor, DATASET_CSV, CONTENT_CSV, MODELS_DIR),
+                    daemon=True,
+                )
+                t.start()
+            yield
+        finally:
+            scheduler.shutdown(wait=False)
+    else:
+        yield
 
 
 app = FastAPI(title="Vigia", lifespan=lifespan)
@@ -113,7 +134,7 @@ def _content_probe(domain):
     verdict = content_predictor.score_text(combo)
     cmeta = _meta(METRICS_CONTENT_JSON)
     if verdict:
-        if status == "gambling" and verdict["probability_gambling"] < 0.97:
+        if status in ("gambling", "gambling_funnel") and verdict["probability_gambling"] < 0.97:
             verdict["is_gambling"] = True
             verdict["confidence_percent"] = 97.0
             verdict["probability_gambling"] = 0.97
@@ -150,7 +171,9 @@ def _fuse(domain_verdict, content_probe):
 
 
 @app.get("/predict/{domain}")
-def predict(domain: str):
+def predict(domain: str, request: Request):
+    if _SERVERLESS:
+        _check_rate(request)
     if not domain_predictor.ready():
         raise HTTPException(status_code=503, detail="model not ready, retrain in progress")
     domain_verdict = domain_predictor.predict(domain)
@@ -163,7 +186,12 @@ def predict(domain: str):
 
 
 @app.post("/dataset")
-def add_to_dataset(item: DatasetItem):
+def add_to_dataset(item: DatasetItem, request: Request):
+    if _SERVERLESS:
+        raise HTTPException(
+            status_code=403,
+            detail="read-only: dataset updates run in Docker or via GitHub Actions",
+        )
     domain, status, total = append_domain(DATASET_CSV, item.domain, item.is_gambling)
     if domain is None:
         raise HTTPException(status_code=422, detail="invalid domain")

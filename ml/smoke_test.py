@@ -122,6 +122,9 @@ def main():
         ({"title": "Hashed", "meta": "", "text": "python sdk docs install guides", "domain": "example.com", "raw_markers": "mrktep6q3wyh7dti%252brmksm4nbivqwjr1"}, 0, "normal"),
         ({"title": "K8凯发·天生赢家", "meta": "", "text": "亚洲顶级在线娱乐平台 官方实力直营 信誉保障 大额无忧", "domain": "008b.vip", "raw_markers": "<html lang=cn>"}, 1, "gambling"),
         ({"title": "首页", "meta": "", "text": "欢迎访问本站 新闻资讯 产品中心 关于我们 联系我们 公司介绍 人才招聘 服务支持 常见问题 隐私政策", "domain": "example.cn", "raw_markers": "..."}, 0, "normal"),
+        ({"title": "APP下载", "meta": "", "text": "APP下载 全网独家 日入300-3000 加入服务器 bc999 添加账号 S88888 接待老师 注册教程 下载APP 注册并登录", "domain": "005999.vip", "raw_markers": "<html lang=zh-cn>"}, 1, "gambling_funnel"),
+        ({"title": "加入服务器", "meta": "", "text": "欢迎加入我们的游戏服务器 输入IP地址 开始游玩 服务器状态 常见问题 关于我们 联系我们 下载客户端", "domain": "mc-server.com", "raw_markers": "..."}, 0, "normal"),
+        ({"title": "Job", "meta": "", "text": "兼职招聘 日入200-500 立即报名 联系方式 公司简介 岗位要求 福利待遇 上班时间 工作地点", "domain": "job.cn", "raw_markers": "..."}, 0, "normal"),
     ]
     for page, elabel, estatus in cases:
         label, status = classify_page(page)

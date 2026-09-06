@@ -1,0 +1,67 @@
+name: nightly-retrain
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: uv pip install --system -r requirements-ml.txt
+
+      - name: Run nightly job
+        env:
+          SCRAPINGBEE_TOKEN: ${{ secrets.SCRAPINGBEE_TOKEN }}
+        run: python -m ml.nightly
+
+      - name: Commit updated data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: nightly retrain"
+          file_pattern: "data/"
+          commit_user_name: "vigia-bot"
+          commit_user_email: "vigia-bot@users.noreply.github.com"
+
+  deploy:
+    needs: retrain
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'schedule' && secrets.VERCEL_TOKEN != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel
+
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+          SCRAPINGBEE_TOKEN: ${{ secrets.SCRAPINGBEE_TOKEN }}
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"

@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
-data/
 .DS_Store
+
+# regenerated fresh every nightly job from GAMBLING_URL
+data/blocklist.txt

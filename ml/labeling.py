@@ -43,7 +43,12 @@ SHELL_JS_MARKERS = ["jsjiami", "sm4.js"]
 
 _LOGIN_TITLES = ["login", "log in", "sign in", "member login", "登錄", "登录", "登入"]
 
-# real <script src="...sm4.js">, SM4 anti-bot lib used by Chinese gambling shells
+# combined signals of a gambling recruitment funnel (chat-app agent onboarding).
+# Individually generic; flagged only when several co-occur.
+FUNNEL_TERMS = [
+    "加入服务器", "接待", "日入", "添加好友", "添加账号", "注册教程",
+    "下载APP", "APP下载", "注册并登录", "邀请码", "导师", "收徒",
+]
 _SM4_SCRIPT_RE = re.compile(r'src=["\'][^"\']*sm4\.js["\']', re.I)
 
 # CJK + Thai detection for shell-title signal
@@ -79,6 +84,25 @@ def _real_text_len(title, text, meta):
 def _numeric_prefix(domain):
     base = domain.split(":")[0].lower()
     return base[:1].isdigit()
+
+
+def _funnel_count(title, text, meta):
+    combined = _lower_combine(title, text, meta)
+    return sum(1 for t in FUNNEL_TERMS if t in combined)
+
+
+# agent / income anchors — presence signals recruiting, not just an app page
+_FUNNEL_ANCHORS = ["接待", "日入", "导师", "收徒"]
+
+
+def is_recruitment_funnel(title, text, meta):
+    """Chinese gambling-recruit funnel: many funnel signals + agent/income anchor."""
+    combined = _lower_combine(title, text, meta)
+    if not (_CJK_RE.search(combined) or _THAI_RE.search(combined)):
+        return False
+    if not any(a in combined for a in _FUNNEL_ANCHORS):
+        return False
+    return _funnel_count(title, text, meta) >= 4
 
 
 def is_shell(title, text, meta, raw_markers=None):
@@ -155,6 +179,8 @@ def classify_page(page):
     if is_parking(title, text, meta):
         return None, "parked"
     real_len = _real_text_len(title, text, meta)
+    if is_recruitment_funnel(title, text, meta):
+        return 1, "gambling_funnel"
     if is_gambling_text(title, text, meta, real_len):
         return 1, "gambling"
     if real_len >= _MIN_REAL_TEXT:

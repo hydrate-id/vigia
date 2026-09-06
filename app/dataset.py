@@ -4,7 +4,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from ml.features import normalize_domain
+from ml.domain import normalize_domain
 
 _LOCK = threading.Lock()
 

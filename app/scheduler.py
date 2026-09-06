@@ -4,7 +4,13 @@ import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import CONTENT_CSV, DATASET_CSV, MODELS_DIR, RETRAIN_HOUR, RETRAIN_MINUTE
+from app.config import (
+    CONTENT_CSV,
+    DATASET_CSV,
+    MODELS_DIR,
+    RETRAIN_HOUR,
+    RETRAIN_MINUTE,
+)
 from app.dataset import ensure_content_csv, ensure_csv, read_rows
 from ml.train import retrain_content, retrain_domain
 
@@ -22,16 +28,11 @@ def _need_seed(csv_path):
     return min(n0, n1) < 1
 
 
-def _train_all(csv_path, content_path, models_dir):
-    metrics = {
-        "domain": retrain_domain(csv_path, models_dir),
-        "content": retrain_content(content_path, models_dir),
-    }
-    log.info("retrain done: %s", metrics)
-    return metrics
-
-
 def bootstrap(domain_predictor, content_predictor, csv_path=None, content_path=None, models_dir=None):
+    """Train missing models at startup when no model exists yet.
+
+    Nightly retrain runs on GitHub Actions (see .github/workflows/nightly-retrain.yml).
+    """
     csv_path = csv_path or DATASET_CSV
     content_path = content_path or CONTENT_CSV
     models_dir = models_dir or MODELS_DIR
@@ -64,6 +65,10 @@ def bootstrap(domain_predictor, content_predictor, csv_path=None, content_path=N
 
 
 def make_scheduler(domain_predictor, content_predictor, csv_path=None, content_path=None, models_dir=None):
+    """APScheduler cron: nightly enrich + retrain (worker/Docker mode only).
+
+    Serverless (Vercel) runs the same job via GitHub Actions instead.
+    """
     csv_path = csv_path or DATASET_CSV
     content_path = content_path or CONTENT_CSV
     models_dir = models_dir or MODELS_DIR
@@ -75,16 +80,26 @@ def make_scheduler(domain_predictor, content_predictor, csv_path=None, content_p
                 from ml.enrich import enrich
 
                 log.info("NRD enrich started")
-                result = enrich(csv_path, content_path, domain_predictor, content_predictor)
+                result = enrich(csv_path, content_path)
                 log.info("enrich done: %s", result)
             except Exception:
-                log.exception("enrich failed, retrying anyway")
+                log.exception("enrich failed, retraining anyway")
             try:
-                _train_all(csv_path, content_path, models_dir)
+                metrics = {
+                    "domain": retrain_domain(csv_path, models_dir),
+                    "content": retrain_content(content_path, models_dir),
+                }
+                log.info("retrain done: %s", metrics)
                 domain_predictor.load()
                 content_predictor.load()
             except Exception:
                 log.exception("scheduled retrain failed")
 
-    sched.add_job(job, CronTrigger(hour=RETRAIN_HOUR, minute=RETRAIN_MINUTE), id="retrain", coalesce=True)
+    sched.add_job(
+        job,
+        CronTrigger(hour=RETRAIN_HOUR, minute=RETRAIN_MINUTE),
+        id="retrain",
+        coalesce=True,
+        max_instances=1,
+    )
     return sched

@@ -2,12 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-ml.txt .
+RUN pip install --no-cache-dir -r requirements-ml.txt
 
 COPY app ./app
 COPY ml ./ml
-RUN mkdir -p data/models
+
+ENV VIGIA_WORKER=1
 
 VOLUME ["/app/data"]
 EXPOSE 8000
