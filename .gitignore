@@ -5,3 +5,4 @@ __pycache__/
 
 # regenerated fresh every nightly job from GAMBLING_URL
 data/blocklist.txt
+.vercel
