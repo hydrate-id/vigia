@@ -1,0 +1,166 @@
+import logging
+import threading
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from app.config import (
+    CONTENT_CSV,
+    DATASET_CSV,
+    METRICS_CONTENT_JSON,
+    METRICS_JSON,
+    MODEL_CONTENT_ONNX,
+    MODEL_ONNX,
+    MODELS_DIR,
+    PREDICT_CONTENT_WEIGHT,
+    PREDICT_THRESHOLD,
+)
+from app.dataset import append_domain, read_content_rows, read_rows
+from app.predictor import Predictor
+from app.scheduler import bootstrap, make_scheduler
+from ml.features import normalize_domain
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("vigia")
+
+domain_predictor = Predictor(MODEL_ONNX, METRICS_JSON, threshold=PREDICT_THRESHOLD, normalizer=normalize_domain)
+content_predictor = Predictor(MODEL_CONTENT_ONNX, METRICS_CONTENT_JSON, threshold=PREDICT_THRESHOLD)
+scheduler = None
+
+
+def _meta(path):
+    if not path.exists():
+        return None
+    import json
+
+    return json.loads(path.read_text())
+
+
+@asynccontextmanager
+async def lifespan(app):
+    global scheduler
+    domain_predictor.load()
+    content_predictor.load()
+    scheduler = make_scheduler(
+        domain_predictor, content_predictor, DATASET_CSV, CONTENT_CSV, MODELS_DIR
+    )
+    scheduler.start()
+    if not (domain_predictor.ready() and content_predictor.ready()):
+        t = threading.Thread(
+            target=bootstrap,
+            args=(domain_predictor, content_predictor, DATASET_CSV, CONTENT_CSV, MODELS_DIR),
+            daemon=True,
+        )
+        t.start()
+    yield
+    scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Vigia", lifespan=lifespan)
+
+
+class DatasetItem(BaseModel):
+    domain: str
+    is_gambling: bool
+
+
+@app.get("/health")
+def health():
+    rows = read_rows(DATASET_CSV)
+    n1 = sum(1 for v in rows.values() if v == 1)
+    crows = read_content_rows(CONTENT_CSV)
+    cn1 = sum(1 for v in crows.values() if v[0] == 1)
+    return {
+        "domain_model_ready": domain_predictor.ready(),
+        "content_model_ready": content_predictor.ready(),
+        "total_rows": len(rows),
+        "n_gambling": n1,
+        "n_normal": len(rows) - n1,
+        "content_total_rows": len(crows),
+        "content_n_gambling": cn1,
+        "content_n_normal": len(crows) - cn1,
+        "domain_model": _meta(METRICS_JSON),
+        "content_model": _meta(METRICS_CONTENT_JSON),
+    }
+
+
+def _content_probe(domain):
+    from ml.labeling import classify_page
+    from ml.scrape import fetch_page
+
+    if not content_predictor.ready():
+        return {"status": "model_not_ready", "verdict": None}
+    page = fetch_page(domain)
+    if page is None:
+        return {"status": "fetch_failed", "verdict": None}
+    label, status = classify_page(page)
+    if label is None:
+        return {"status": status, "verdict": None}
+    if status == "gambling_shell":
+        return {
+            "status": status,
+            "verdict": {
+                "is_gambling": True,
+                "confidence_percent": 97.0,
+                "probability_gambling": 0.97,
+                "model_version": "shell_gate",
+            },
+        }
+    combo = " ".join(
+        x for x in (page.get("title", ""), page.get("meta", ""), page.get("text", "")) if x
+    ).strip()
+    verdict = content_predictor.score_text(combo)
+    cmeta = _meta(METRICS_CONTENT_JSON)
+    if verdict:
+        verdict["model_version"] = (cmeta or {}).get("trained_at")
+    return {"status": status, "verdict": verdict}
+
+
+def _fuse(domain_verdict, content_probe):
+    p_domain = domain_verdict["probability_gambling"]
+    p = p_domain
+    source = "domain"
+    if content_probe["verdict"]:
+        p_content = content_probe["verdict"]["probability_gambling"]
+        p = PREDICT_CONTENT_WEIGHT * p_content + (1 - PREDICT_CONTENT_WEIGHT) * p_domain
+        source = "domain+content"
+    elif content_probe["status"] in ("shell", "parked", "ambiguous"):
+        source = f"domain (content={content_probe['status']})"
+    elif content_probe["status"] == "fetch_failed":
+        source = "domain (content=fetch_failed)"
+    elif content_probe["status"] == "model_not_ready":
+        source = "domain (content=model_not_ready)"
+    is_gambling = p >= PREDICT_THRESHOLD
+    confidence = max(p, 1 - p) * 100
+    return {
+        "domain": domain_verdict["domain"],
+        "is_gambling": is_gambling,
+        "confidence_percent": round(confidence, 1),
+        "probability_gambling": round(p, 4),
+        "source": source,
+        "domain_verdict": domain_verdict,
+        "content_status": content_probe["status"],
+        "content_verdict": content_probe["verdict"],
+    }
+
+
+@app.get("/predict/{domain}")
+def predict(domain: str):
+    if not domain_predictor.ready():
+        raise HTTPException(status_code=503, detail="model not ready, retrain in progress")
+    domain_verdict = domain_predictor.predict(domain)
+    if domain_verdict is None:
+        raise HTTPException(status_code=422, detail="invalid domain")
+    dmeta = _meta(METRICS_JSON)
+    domain_verdict["model_version"] = (dmeta or {}).get("trained_at")
+    content_probe = _content_probe(domain_verdict["domain"])
+    return _fuse(domain_verdict, content_probe)
+
+
+@app.post("/dataset")
+def add_to_dataset(item: DatasetItem):
+    domain, status, total = append_domain(DATASET_CSV, item.domain, item.is_gambling)
+    if domain is None:
+        raise HTTPException(status_code=422, detail="invalid domain")
+    return {"domain": domain, "status": status, "total_rows": total}
