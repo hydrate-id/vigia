@@ -40,8 +40,9 @@ Deploy (free tier needs a personal account, not an org):
 vercel deploy --prod
 ```
 
-Env vars: `API_TOKEN` (optional, see below), `SCRAPINGBEE_TOKEN` (scrape
-fallback when a site blocks the direct request).
+Env vars: `API_TOKEN` (optional, see below), `SCRAPINGANT_API_KEY` (scrape
+fallback when a site blocks the direct request; JS render over datacenter
+proxy, budget-capped at ~250 credits per run via `SCRAPE_ANT_BUDGET_CREDITS`).
 
 ## Endpoints
 

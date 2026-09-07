@@ -2,6 +2,8 @@ import gzip
 import os
 import re
 import ssl
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -10,7 +12,13 @@ from html.parser import HTMLParser
 
 from app.config import SCRAPE_MAX_BYTES, SCRAPE_TEXT_CAP, SCRAPE_THREADS, SCRAPE_TIMEOUT
 
-SCRAPINGBEE_URL = "https://app.scrapingbee.com/api/v1/"
+SCRAPINGANT_URL = "https://api.scrapingant.com/v2/general"
+SCRAPINGANT_TIMEOUT = 45
+# Budget guard: stop calling the paid fallback once this many credits burned
+# in a single process run (default 250/night -> ~7.5k of the 10k free month).
+SA_BUDGET_CREDITS = int(os.environ.get("SCRAPE_ANT_BUDGET_CREDITS", "250"))
+_sa_lock = threading.Lock()
+_sa_credits = 0
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -80,7 +88,8 @@ def _clean(html_bytes):
 
 
 class _Opener:
-    def __init__(self, ssl_verify=True):
+    def __init__(self, ssl_verify=True, timeout=SCRAPE_TIMEOUT):
+        self.timeout = timeout
         ctx = ssl.create_default_context() if ssl_verify else ssl._create_unverified_context()
         handlers = [_Redirect(), urllib.request.HTTPSHandler(context=ctx)]
         self.opener = urllib.request.build_opener(*handlers)
@@ -95,55 +104,86 @@ class _Opener:
                 "Accept-Encoding": "gzip",
             },
         )
-        with self.opener.open(req, timeout=SCRAPE_TIMEOUT) as resp:
+        with self.opener.open(req, timeout=self.timeout) as resp:
             data = resp.read(SCRAPE_MAX_BYTES + 1)
             final_url = resp.geturl()
+            headers = resp.headers
             if resp.headers.get("Content-Encoding") == "gzip":
                 data = gzip.decompress(data)
-            return data[:SCRAPE_MAX_BYTES], final_url
+            return data[:SCRAPE_MAX_BYTES], final_url, headers
 
 
 _VERIFY = _Opener()
 _NO_VERIFY = _Opener(ssl_verify=False)
+_SA_OPENER = _Opener(timeout=SCRAPINGANT_TIMEOUT)
 
 
 def _fetch_bytes(url):
     for opener in (_VERIFY, _NO_VERIFY):
         try:
-            return opener.fetch(url)
+            data, final_url, _headers = opener.fetch(url)
+            return data, final_url
         except Exception:
             continue
     return None, None
 
 
-def _fetch_scrapingbee(url):
-    token = os.environ.get("SCRAPINGBEE_TOKEN")
-    if not token:
-        return None
-    params = {
-        "api_key": token,
-        "url": url,
-        "render_js": "true",
-        "premium_proxy": "true",
-        "country_code": "id",
-    }
-    sb_url = SCRAPINGBEE_URL + "?" + urllib.parse.urlencode(params)
-    try:
-        return _VERIFY.fetch(sb_url)
-    except Exception:
+def fallback_credits_used():
+    return _sa_credits
+
+
+def _fetch_scrapingant(url):
+    """Render url via ScrapingAnt (JS + datacenter proxy). None, None when spent."""
+    global _sa_credits
+    key = os.environ.get("SCRAPINGANT_API_KEY")
+    if not key:
         return None, None
+    # free tier allows one concurrent request; serialize + gate on budget here
+    with _sa_lock:
+        if _sa_credits >= SA_BUDGET_CREDITS:
+            return None, None
+        params = {
+            "url": url,
+            "x-api-key": key,
+            "browser": "true",
+            "proxy_country": "id",
+        }
+        ant_url = SCRAPINGANT_URL + "?" + urllib.parse.urlencode(params)
+        for _attempt in range(3):
+            try:
+                data, final_url, headers = _SA_OPENER.fetch(ant_url)
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    time.sleep(2)
+                    continue
+                return None, None
+            except Exception:
+                return None, None
+            break
+        else:
+            return None, None
+        try:
+            cost = int(headers.get("Ant-credits-cost") or 0)
+        except (TypeError, ValueError):
+            cost = 0
+        _sa_credits += cost
+        if not data:
+            return None, None
+        return data, final_url
 
 
 def fetch_page(domain):
     """Fetch a domain page or None. Follows redirects with a browser UA."""
     for scheme in ("https", "http"):
         data, final_url = _fetch_bytes(f"{scheme}://{domain}/")
-        if not data:
-            sb = _fetch_scrapingbee(f"{scheme}://{domain}/")
-            if sb:
-                data, final_url = sb
-        if not data:
-            continue
+        if data:
+            page = _clean(data)
+            page["final_url"] = final_url or ""
+            if page["title"] or page["text"]:
+                page["domain"] = domain
+                return page
+    data, final_url = _fetch_scrapingant(f"https://{domain}/")
+    if data:
         page = _clean(data)
         page["final_url"] = final_url or ""
         if page["title"] or page["text"]:

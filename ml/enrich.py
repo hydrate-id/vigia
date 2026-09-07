@@ -27,7 +27,7 @@ from app.dataset import (
 )
 from ml.features import normalize_domain
 from ml.labeling import classify_page
-from ml.scrape import fetch_pages
+from ml.scrape import fallback_credits_used, fetch_pages
 
 log = logging.getLogger("vigia.enrich")
 
@@ -136,7 +136,7 @@ def enrich(csv_path=None, content_path=None, domain_predictor=None, content_pred
         if label is not None:
             items.append((d, label, combo))
     if not items:
-        result.update({"content_pos": 0, "content_neg": 0, "scraped": len(pages)})
+        result.update({"content_pos": 0, "content_neg": 0, "scraped": len(pages), "sa_credits": fallback_credits_used()})
         return result
 
     pos = [it for it in items if it[1] == 1]
@@ -149,12 +149,13 @@ def enrich(csv_path=None, content_path=None, domain_predictor=None, content_pred
             "content_pos": pos_added,
             "content_neg": neg_added,
             "scraped": len(pages),
+            "sa_credits": fallback_credits_used(),
         }
     )
     return result
 
 
-def bootstrap_content(csv_path=None, content_path=None, per_class=400):
+def bootstrap_content(csv_path=None, content_path=None, per_class=50):
     csv_path = csv_path or DATASET_CSV
     content_path = content_path or CONTENT_CSV
     rows = read_rows(csv_path)
@@ -182,4 +183,4 @@ def bootstrap_content(csv_path=None, content_path=None, per_class=400):
     n1 = sum(1 for v in keep.values() if v[0] == 1)
     n0 = len(keep) - n1
     log.info("content bootstrap: scraped=%d labeled=%d total=%d (%d/%d)", len(sample_domains), len(new_rows), len(keep), n1, n0)
-    return {"scraped": len(sample_domains), "labeled": len(new_rows), "total": len(keep)}
+    return {"scraped": len(sample_domains), "labeled": len(new_rows), "total": len(keep), "sa_credits": fallback_credits_used()}

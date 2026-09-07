@@ -28,7 +28,7 @@ UMBRELLA_URL = "https://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zi
 
 NRD_MANIFEST_URL = "https://smet.cz/nrd/data/manifest.json"
 NRD_DAILY_URL = "https://smet.cz/nrd/data/daily/{date}.txt.gz"
-NRD_SAMPLE = 2000
+NRD_SAMPLE = 100
 NRD_CONF_POS = 0.99
 NRD_CONF_NEG = 0.01
 BLOCKLIST_TTL_HOURS = 24
