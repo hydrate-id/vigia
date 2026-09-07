@@ -46,7 +46,9 @@ jobs:
   deploy:
     needs: retrain
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'schedule' && secrets.VERCEL_TOKEN != '' }}
+    if: github.event_name == 'schedule'
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,9 +56,11 @@ jobs:
           lfs: true
 
       - name: Install Vercel CLI
+        if: env.VERCEL_TOKEN != ''
         run: npm i -g vercel
 
       - name: Deploy to Vercel
+        if: env.VERCEL_TOKEN != ''
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
