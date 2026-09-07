@@ -28,7 +28,7 @@ jobs:
           python-version: "3.12"
 
       - name: Create venv
-        run: uv venv
+        run: uv venv --clear
 
       - name: Install deps
         run: uv pip install -r requirements-ml.txt
