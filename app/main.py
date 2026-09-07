@@ -1,9 +1,11 @@
 import logging
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.config import (
@@ -14,6 +16,7 @@ from app.config import (
     MODEL_CONTENT_ONNX,
     MODEL_ONNX,
     MODELS_DIR,
+    PREDICT_CACHE_TTL_HOURS,
     PREDICT_CONTENT_WEIGHT,
     PREDICT_THRESHOLD,
 )
@@ -79,6 +82,35 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Vigia", lifespan=lifespan)
+
+_PREDICT_CACHE_TTL_S = PREDICT_CACHE_TTL_HOURS * 3600
+_predict_cache = {}
+_predict_cache_lock = threading.Lock()
+
+
+def _model_version():
+    dm = (_meta(METRICS_JSON) or {}).get("trained_at")
+    cm = (_meta(METRICS_CONTENT_JSON) or {}).get("trained_at")
+    return (dm, cm)
+
+
+def _cache_get(key, version):
+    with _predict_cache_lock:
+        item = _predict_cache.get(key)
+    if (
+        item is not None
+        and item[0] == version
+        and time.time() - item[1] < _PREDICT_CACHE_TTL_S
+    ):
+        return item[2]
+    return None
+
+
+def _cache_put(key, version, value):
+    with _predict_cache_lock:
+        if len(_predict_cache) > 100_000:
+            _predict_cache.clear()  # ponytail: blunt sweep, version+TTL guard staleness
+        _predict_cache[key] = (version, time.time(), value)
 
 
 class DatasetItem(BaseModel):
@@ -176,13 +208,25 @@ def predict(domain: str, request: Request):
         _check_rate(request)
     if not domain_predictor.ready():
         raise HTTPException(status_code=503, detail="model not ready, retrain in progress")
-    domain_verdict = domain_predictor.predict(domain)
+    normalized = normalize_domain(domain)
+    if normalized is None:
+        raise HTTPException(status_code=422, detail="invalid domain")
+    version = _model_version()
+    cached = _cache_get(normalized, version)
+    if cached is not None:
+        resp = JSONResponse(cached)
+        resp.headers["Cache-Control"] = f"s-maxage={int(_PREDICT_CACHE_TTL_S)}"
+        return resp
+    domain_verdict = domain_predictor.predict(normalized)
     if domain_verdict is None:
         raise HTTPException(status_code=422, detail="invalid domain")
-    dmeta = _meta(METRICS_JSON)
-    domain_verdict["model_version"] = (dmeta or {}).get("trained_at")
+    domain_verdict["model_version"] = version[0]
     content_probe = _content_probe(domain_verdict["domain"])
-    return _fuse(domain_verdict, content_probe)
+    result = _fuse(domain_verdict, content_probe)
+    _cache_put(normalized, version, result)
+    resp = JSONResponse(result)
+    resp.headers["Cache-Control"] = f"s-maxage={int(_PREDICT_CACHE_TTL_S)}"
+    return resp
 
 
 @app.post("/dataset")
