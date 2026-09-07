@@ -2,10 +2,24 @@
 
 Detect online gambling domains by name and page content. Two models, one API.
 
+> Read the [Support and affiliation](#support-and-affiliation) section before using this project.
+
+## Support and affiliation
+
+Vigia is built as a community contribution in support of **Internet Sehat**, the
+Indonesian government program for a healthier internet, run by **KOMDIGI**
+(Kementerian Komunikasi dan Digital / Ministry of Communication and Digital
+Affairs).
+
+Vigia is an independent open-source project maintained by volunteers under the
+Republic of Indonesia (NKRI). We comply with applicable Indonesian law. We are
+**not affiliated with, endorsed by, or otherwise connected to KOMDIGI**: Vigia
+is not an official government tool, and its outputs and views are our own.
+
 ## What it does
 
-- **Domain model** — Logistic Regression over character n-grams of a domain name.
-- **Content model** — Logistic Regression over visible HTML text.
+- **Domain model**: Logistic Regression over character n-grams of a domain name.
+- **Content model**: Logistic Regression over visible HTML text.
 - Runs both on every predict, then fuses the result.
 - Learn from newly registered domains nightly.
 
@@ -32,7 +46,7 @@ Read-only filesystem (except `/tmp`) and no cron, so:
 - Nightly retrain runs on **GitHub Actions**
   (`.github/workflows/nightly-retrain.yml`), which commits the updated
   `data/` models back, then auto-deploys to Vercel.
-- Worker (`APScheduler`) is **off** — no `VIGIA_WORKER`.
+- Worker (`APScheduler`) is **off**: no `VIGIA_WORKER`.
 
 Deploy (free tier needs a personal account, not an org):
 
@@ -46,12 +60,12 @@ proxy, budget-capped at ~250 credits per run via `SCRAPE_ANT_BUDGET_CREDITS`).
 
 ## Endpoints
 
-- `GET /predict/{domain}?token=...` — fetches the page, scores both models,
+- `GET /predict/{domain}?token=...`: fetches the page, scores both models,
   fuses: `p = 0.7 * content + 0.3 * domain`. Returns `is_gambling`,
   `confidence_percent`, `source`, plus both verdicts.
-- `POST /dataset` — body `{"domain": "...", "is_gambling": true|false}`.
+- `POST /dataset`: body `{"domain": "...", "is_gambling": true|false}`.
   Docker only; on Vercel it is read-only.
-- `GET /health` — readiness + row counts.
+- `GET /health`: readiness + row counts.
 
 ### Rate limit (Vercel, like nawala)
 
@@ -75,16 +89,16 @@ servers are caught by a multi-signal funnel gate.
 
 ## Nightly job
 
-`ml/nightly.py` — fetch yesterday's NRD from smet.cz, confirmed gambling →
+`ml/nightly.py`: fetch yesterday's NRD from smet.cz, confirmed gambling →
 `dataset.csv`, scrape ≤2000 new domains → label by text → `content.csv`, then
 retrain both models. Runs on GitHub Actions (or the in-Docker APScheduler in
 worker mode).
 
 ## Layout
 
-- `app/` — FastAPI, onnxruntime predictor, APScheduler (worker), rate limit
-- `ml/` — train, seed, enrich, scrape, labeling, nightly, smoke test
-- `data/` — CSV corpora + ONNX models (tracked in git)
+- `app/`: FastAPI, onnxruntime predictor, APScheduler (worker), rate limit
+- `ml/`: train, seed, enrich, scrape, labeling, nightly, smoke test
+- `data/`: CSV corpora + ONNX models (tracked in git)
 - `ml/features.py` imports sklearn; runtime paths use `ml/domain.py` instead
   so the serverless bundle stays free of scikit-learn.
 
@@ -92,5 +106,5 @@ worker mode).
 
 - Negative seed domains: Cisco Umbrella top-1M.
 - Gambling seed domains: TrustPositif mirror (alsyundawy).
-- Nightly enrichment: **Newly Registered Domains — smet.cz** (CC BY 4.0).
+- Nightly enrichment: **Newly Registered Domains from smet.cz** (CC BY 4.0).
   Redistribute only with attribution to `smet.cz`.
