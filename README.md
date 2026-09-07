@@ -67,7 +67,7 @@ proxy, budget-capped at ~250 credits per run via `SCRAPE_ANT_BUDGET_CREDITS`).
   Docker only; on Vercel it is read-only.
 - `GET /health`: readiness + row counts.
 
-### Rate limit (Vercel, like nawala)
+### Rate limit (Vercel)
 
 - No `API_TOKEN` env set → public, 3 req/s per IP.
 - `API_TOKEN` env set → requests with `?token=<API_TOKEN>` skip the limit;
