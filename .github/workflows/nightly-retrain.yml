@@ -43,8 +43,6 @@ jobs:
         with:
           commit_message: "chore: nightly retrain"
           file_pattern: "data/"
-          commit_user_name: "vigia-bot"
-          commit_user_email: "vigia-bot@users.noreply.github.com"
 
   deploy:
     needs: retrain
