@@ -27,13 +27,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Create venv
+        run: uv venv
+
       - name: Install deps
-        run: uv pip install --system -r requirements-ml.txt
+        run: uv pip install -r requirements-ml.txt
 
       - name: Run nightly job
         env:
           SCRAPINGBEE_TOKEN: ${{ secrets.SCRAPINGBEE_TOKEN }}
-        run: python -m ml.nightly
+        run: uv run python -m ml.nightly
 
       - name: Commit updated data
         uses: stefanzweifel/git-auto-commit-action@v5
