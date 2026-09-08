@@ -64,6 +64,11 @@ jobs:
         with:
           lfs: true
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
       - name: Install Vercel CLI
         if: env.VERCEL_TOKEN != ''
         run: npm i -g vercel
