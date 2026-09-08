@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
+    inputs:
+      deploy_only:
+        description: "Skip retrain, deploy current data to Vercel"
+        type: boolean
+        default: false
 
 concurrency:
   group: retrain
@@ -28,12 +33,15 @@ jobs:
           python-version: "3.12"
 
       - name: Create venv
+        if: github.event.inputs.deploy_only != 'true'
         run: uv venv --clear
 
       - name: Install deps
+        if: github.event.inputs.deploy_only != 'true'
         run: uv pip install -r requirements-ml.txt
 
       - name: Run nightly job
+        if: github.event.inputs.deploy_only != 'true'
         env:
           SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
         run: uv run python -m ml.nightly
@@ -47,7 +55,7 @@ jobs:
   deploy:
     needs: retrain
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event.inputs.deploy_only == 'true'
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
