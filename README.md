@@ -19,6 +19,8 @@ is not an official government tool, and its outputs and views are our own.
 ## What it does
 
 - **Domain model**: Logistic Regression over character n-grams of a domain name.
+  Inference then applies floors (model unchanged): clear gambling lexicon →
+  `0.9`, weird junk-TLD hosts → `0.6` (`ml/domain_priors.py`).
 - **Content model**: Logistic Regression over visible HTML text.
 - Runs both on every predict, then fuses the result.
 - Learn from newly registered domains nightly.
@@ -62,7 +64,8 @@ proxy, budget-capped at ~250 credits per run via `SCRAPE_ANT_BUDGET_CREDITS`).
 
 - `GET /predict/{domain}?token=...`: fetches the page, scores both models,
   fuses: `p = 0.7 * content + 0.3 * domain`. Returns `is_gambling`,
-  `confidence_percent`, `source`, plus both verdicts.
+  `confidence_percent`, `source`, plus both verdicts. Domain verdict may
+  include `domain_prior` (`lexicon` or `weird`) when a floor was applied.
 - `POST /dataset`: body `{"domain": "...", "is_gambling": true|false}`.
   Docker only; on Vercel it is read-only.
 - `GET /health`: readiness + row counts.
@@ -97,10 +100,12 @@ worker mode).
 ## Layout
 
 - `app/`: FastAPI, onnxruntime predictor, APScheduler (worker), rate limit
-- `ml/`: train, seed, enrich, scrape, labeling, nightly, smoke test
+- `ml/`: train, seed, enrich, scrape, labeling, nightly, smoke test,
+  domain priors
 - `data/`: CSV corpora + ONNX models (tracked in git)
 - `ml/features.py` imports sklearn; runtime paths use `ml/domain.py` instead
-  so the serverless bundle stays free of scikit-learn.
+  so the serverless bundle stays free of scikit-learn. Priors live in
+  `ml/domain_priors.py` (inference-only; no sklearn).
 
 ## Data attribution
 
