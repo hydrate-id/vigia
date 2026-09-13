@@ -1,24 +1,66 @@
 import tempfile
 from pathlib import Path
 
+from app.config import MODELS_DIR
 from app.dataset import save_content_rows, save_rows
 from app.predictor import Predictor
-from ml.features import normalize_domain
+from ml.domain import normalize_domain
 from ml.labeling import classify_page
 from ml.train import retrain_content, retrain_domain
 
+# Synthetic domains for DOMAIN-PREDICTOR smoke only (not content, not live sites).
+# These names are fictional fixtures on reserved TLDs (.invalid / .test / .example)
+# that do not resolve on the public Internet. When this smoke test was written,
+# none of these domains existed as real sites. They exist solely to exercise the
+# domain model on gambling-like lexical patterns — not to promote, list, or
+# advertise any real online gambling operator.
 JUDOL = [
-    "situsjudol777.com", "slotgacor88.net", "bettoto303.info", "pokerbola99.id",
-    "judiakunpro.biz", "maxwinjudi.org", "livedrawhk.top", "rtpslot4d.online",
-    "kasinoindonesia365.co", "taruhanslotgacor.site", "pragmaticbetqq.net",
-    "bandarjudiqiuqiu.live", "togelsingapur4d.info", "bolajudolgaul.xyz",
-    "agenjudolterbaik.com", "slotpulsa77.asia", "dadubola88.net", "situsjudiqq.id",
+    "slot-gacor-maxwin777.invalid",
+    "situs-slot-gacor-online.invalid",
+    "rtp-slot-gacor-hari-ini.invalid",
+    "agen-slot-gacor-88.invalid",
+    "judi-online-slot-gacor.invalid",
+    "deposit-pulsa-slot-gacor.invalid",
+    "pragmatic-play-slot-gacor.invalid",
+    "gacor-slot-maxwin.invalid",
+    "slotgacor777maxwin.invalid",
+    "situsjudislotgacor.invalid",
+    "slot-gacor-terpercaya-88.invalid",
+    "maxwin-slot-gacor-hari-ini.invalid",
+    "daftar-slot-gacor-online.invalid",
+    "link-alternatif-slot-gacor.invalid",
+    "bocoran-rtp-slot-gacor.invalid",
+    "slot-gacor-maxwin777.test",
+    "rtp-slot-gacor-hari-ini.example",
+    "agen-slot-gacor-88.example",
 ]
 NORMAL = [
     "google.com", "facebook.com", "wikipedia.org", "github.com", "tokopedia.com",
     "shopee.co.id", "detik.com", "kompas.com", "cimbniaga.co.id", "bca.co.id",
     "lazada.co.id", "bukalapak.com", "youtube.com", "twitter.com", "netflix.com",
     "blibli.com", "gojek.com", "grab.com", "cloudflare.com", "mozilla.org",
+]
+
+# Synthetic fixtures for inference priors only (reserved TLDs; not real operators).
+# LEXICON: clear gambling vocabulary that the n-gram alone often misses.
+# WEIRD: random-looking junk-TLD hosts with no gambling words in the name.
+LEXICON_FIXTURES = [
+    "judol-test-fixture.invalid",
+    "togel4d-fixture.invalid",
+    "situs-judi-slot.invalid",
+    "agenjudi88.invalid",
+    "bandarqq99.invalid",
+]
+WEIRD_FIXTURES = [
+    "a8f3k2m9p1q7.xyz",
+    "009951fixture.sbs",
+    "x7k9m2p4q8n1.vip",
+]
+PRIOR_NEGATIVES = [
+    "google.com",
+    "github.com",
+    "judicial.org",
+    "slot2.akamai.net",
 ]
 
 JUDOL_TEXT = [
@@ -68,8 +110,9 @@ def main():
     rows = {d: 1 for d in JUDOL}
     rows.update({d: 0 for d in NORMAL})
     save_rows(csv_path, rows)
-    crows = {d: (1, t) for d, t in zip([f"j{d}.com" for d in range(len(JUDOL_TEXT))], JUDOL_TEXT)}
-    crows.update({d: (0, t) for d, t in zip([f"n{d}.org" for d in range(len(NORMAL_TEXT))], NORMAL_TEXT)})
+    # Synthetic placeholder domains for content rows only (never real operators).
+    crows = {d: (1, t) for d, t in zip([f"fixture-pos-{d}.invalid" for d in range(len(JUDOL_TEXT))], JUDOL_TEXT)}
+    crows.update({d: (0, t) for d, t in zip([f"fixture-neg-{d}.invalid" for d in range(len(NORMAL_TEXT))], NORMAL_TEXT)})
     save_content_rows(content_path, crows)
 
     m_domain = retrain_domain(csv_path, models_dir)
@@ -89,14 +132,48 @@ def main():
     cp = Predictor(models_dir / "model_content.onnx", models_dir / "metrics_content.json")
     assert cp.load(), "load content onnx failed"
 
-    hits = 0
-    for d in JUDOL + NORMAL:
+    # JUDOL fixtures are domain-predictor-only: every positive must score true.
+    for d in JUDOL:
+        r = dp.predict(d)
+        assert r is not None and r["is_gambling"] is True, f"JUDOL domain must be true: {d} -> {r}"
+    hits = len(JUDOL)
+    for d in NORMAL:
         r = dp.predict(d)
         assert r is not None, f"predict {d} None"
-        if r["is_gambling"] == (d in JUDOL):
+        if r["is_gambling"] is False:
             hits += 1
     print(f"OK onnx predict domain: {hits}/{len(JUDOL) + len(NORMAL)} correct")
     assert hits >= 28, "domain smoke accuracy too low"
+
+    # Shipped production domain model must also flag every JUDOL fixture true.
+    prod = Predictor(MODELS_DIR / "model.onnx", MODELS_DIR / "metrics.json", normalizer=normalize_domain)
+    if prod.load():
+        for d in JUDOL:
+            r = prod.predict(d)
+            assert r is not None and r["is_gambling"] is True, (
+                f"production domain model must flag JUDOL fixture true: {d} -> {r}"
+            )
+        print(f"OK production domain model: {len(JUDOL)}/{len(JUDOL)} JUDOL fixtures true")
+
+        for d in LEXICON_FIXTURES:
+            r = prod.predict(d)
+            assert r is not None and r["is_gambling"] is True and r.get("domain_prior") == "lexicon", (
+                f"lexicon prior must flag {d} -> {r}"
+            )
+        for d in WEIRD_FIXTURES:
+            r = prod.predict(d)
+            assert r is not None and r["is_gambling"] is True and r.get("domain_prior") == "weird", (
+                f"weird prior must flag {d} -> {r}"
+            )
+        for d in PRIOR_NEGATIVES:
+            r = prod.predict(d)
+            assert r is not None and r["is_gambling"] is False and "domain_prior" not in r, (
+                f"prior must not FP {d} -> {r}"
+            )
+        print(
+            f"OK domain priors: lexicon={len(LEXICON_FIXTURES)} "
+            f"weird={len(WEIRD_FIXTURES)} neg={len(PRIOR_NEGATIVES)}"
+        )
 
     chits = 0
     for t, expect in [(t, True) for t in JUDOL_TEXT] + [(t, False) for t in NORMAL_TEXT]:
@@ -110,19 +187,20 @@ def main():
     assert dp.predict("not a domain") is None, "invalid domain should be None"
     print("OK invalid domain -> None")
 
+    # classify_page fixtures use synthetic domain placeholders only (no real operators).
     cases = [
-        ({"title": "MALIKATOTO Situs Togel Terpercaya", "meta": "", "text": "slot online gacor daftar sekarang"}, 1, "gambling"),
+        ({"title": "Situs Togel Terpercaya Fixture", "meta": "", "text": "slot online gacor daftar sekarang"}, 1, "gambling"),
         ({"title": "老虎机 赌场 注册送彩金", "meta": "", "text": "百家乐 轮盘 投注"}, 1, "gambling"),
         ({"title": "Home", "meta": "portal berita ekonomi", "text": "Berita nasional dan internasional hari ini lengkap."}, 0, "normal"),
         ({"title": "澳门信息站", "meta": "", "text": ""}, None, "shell"),
         ({"title": "Domain is for sale", "meta": "", "text": "Buy this domain at sedo auction."}, None, "parked"),
         ({"title": "Site", "meta": "", "text": "加载中"}, None, "shell"),
-        ({"title": "澳门信息站", "meta": "", "text": "", "domain": "009951acclaim.sbs", "raw_markers": '<script src="js/sm4.js"></script>'}, 1, "gambling_shell"),
+        ({"title": "澳门信息站", "meta": "", "text": "", "domain": "fixture-gambling-shell.invalid", "raw_markers": '<script src="js/sm4.js"></script>'}, 1, "gambling_shell"),
         ({"title": "搜狐", "meta": "", "text": "搜狐门户 新闻 体育 彩票 健康 财经 娱乐 科技 汽车 房产 教育 文化 时尚 视频 军事 旅游 母婴 星座 奥运 游戏 邮箱 博客 搜狐号 24小时直播 大视野 公益 畅游 17173 政务 网络监督专区 欢迎监督 如实举报 联系我们 法律声明 隐私权政策 网站地图 帮助中心", "domain": "sohu.com", "raw_markers": "..."}, 0, "normal"),
         ({"title": "Hashed", "meta": "", "text": "python sdk docs install guides", "domain": "example.com", "raw_markers": "mrktep6q3wyh7dti%252brmksm4nbivqwjr1"}, 0, "normal"),
-        ({"title": "K8凯发·天生赢家", "meta": "", "text": "亚洲顶级在线娱乐平台 官方实力直营 信誉保障 大额无忧", "domain": "008b.vip", "raw_markers": "<html lang=cn>"}, 1, "gambling"),
+        ({"title": "Fixture凯发·天生赢家", "meta": "", "text": "亚洲顶级在线娱乐平台 官方实力直营 信誉保障 大额无忧", "domain": "fixture-zh-casino.invalid", "raw_markers": "<html lang=cn>"}, 1, "gambling"),
         ({"title": "首页", "meta": "", "text": "欢迎访问本站 新闻资讯 产品中心 关于我们 联系我们 公司介绍 人才招聘 服务支持 常见问题 隐私政策", "domain": "example.cn", "raw_markers": "..."}, 0, "normal"),
-        ({"title": "APP下载", "meta": "", "text": "APP下载 全网独家 日入300-3000 加入服务器 bc999 添加账号 S88888 接待老师 注册教程 下载APP 注册并登录", "domain": "005999.vip", "raw_markers": "<html lang=zh-cn>"}, 1, "gambling_funnel"),
+        ({"title": "APP下载", "meta": "", "text": "APP下载 全网独家 日入300-3000 加入服务器 bc999 添加账号 S88888 接待老师 注册教程 下载APP 注册并登录", "domain": "fixture-recruit-funnel.invalid", "raw_markers": "<html lang=zh-cn>"}, 1, "gambling_funnel"),
         ({"title": "加入服务器", "meta": "", "text": "欢迎加入我们的游戏服务器 输入IP地址 开始游玩 服务器状态 常见问题 关于我们 联系我们 下载客户端", "domain": "mc-server.com", "raw_markers": "..."}, 0, "normal"),
         ({"title": "Job", "meta": "", "text": "兼职招聘 日入200-500 立即报名 联系方式 公司简介 岗位要求 福利待遇 上班时间 工作地点", "domain": "job.cn", "raw_markers": "..."}, 0, "normal"),
     ]

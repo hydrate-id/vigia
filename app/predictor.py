@@ -5,6 +5,7 @@ import numpy as np
 import onnxruntime as ort
 
 from ml.domain import normalize_domain
+from ml.domain_priors import apply_domain_priors
 
 
 class Predictor:
@@ -70,7 +71,11 @@ class Predictor:
         p1 = self._run(domain)
         if p1 is None:
             return None
-        return self._verdict(domain, p1)
+        p1, prior = apply_domain_priors(domain, p1)
+        verdict = self._verdict(domain, p1)
+        if prior:
+            verdict["domain_prior"] = prior
+        return verdict
 
     def score_text(self, text):
         if not text or self._session is None:

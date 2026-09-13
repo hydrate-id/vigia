@@ -13,6 +13,9 @@ BLOCKLIST_CACHE = DATA_DIR / "blocklist.txt"
 
 PREDICT_THRESHOLD = 0.5
 PREDICT_CONTENT_WEIGHT = 0.7
+# Inference-only floors on top of the domain n-gram score (model unchanged).
+DOMAIN_LEXICON_FLOOR = 0.9  # clear gambling terms in the domain name
+DOMAIN_WEIRD_FLOOR = 0.6  # random-looking junk-TLD hosts
 PREDICT_CACHE_TTL_HOURS = 24
 MIN_SAMPLES_PER_CLASS = 15
 SEED_PER_CLASS = 10_000
